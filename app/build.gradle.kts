@@ -65,6 +65,11 @@ android {
     androidResources { noCompress += "tflite" }
     packaging {
         jniLibs { pickFirsts += "**/libc++_shared.so" }
+        // License and manifest files that several libraries (Jackson, the Claude SDK) all ship.
+        resources {
+            excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/INDEX.LIST")
+            pickFirsts += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
     }
 }
 
@@ -132,6 +137,9 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:barcode-scanning:17.3.0") // barcodes and QR codes, model bundled
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta5") // the phone's built-in Gemini Nano (AICore)
+
+    // Optional cloud writing with Claude (off by default; your own Anthropic API key).
+    implementation("com.anthropic:anthropic-java:3.8.0")
 }
 
 kotlin {

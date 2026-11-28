@@ -9,7 +9,7 @@ Please report security issues privately through GitHub:
 
 - **Everything runs on the phone.** Photo grouping, text reading and description writing
   use on-device models (MediaPipe, ML Kit, Gemma 3n). Photos and listings are never uploaded
-  by this app.
+  by this app, unless you turn on cloud writing (below).
 - **Network allowlist.** The app trusts no certificate authority except for Hugging Face
   (`huggingface.co`, `hf.co` and their subdomains), used only for the one-time model
   download (no account or token is sent). All other connections, including telemetry from bundled libraries, fail. Plain HTTP
@@ -19,8 +19,13 @@ Please report security issues privately through GitHub:
   to `api.upcitemdb.com`, `world.openfoodfacts.org` or `openlibrary.org`; these are the only
   extra hosts the network allowlist permits. Redirects to other hosts are refused, replies
   are capped at 256 KB and treated as untrusted text. Off switch in Settings.
-- **No cloud writing.** Descriptions are always written on the phone (Gemini Nano or Gemma 3n);
-  photos never leave the phone.
+- **Cloud writing with Claude: off by default.** Only when you turn it on and add your own
+  Anthropic API key: for each description, up to 4 of the item's photos (shrunk to 1024 px
+  JPEGs, no location data), the text and codes read from them, your notes, condition, writing
+  style and region are sent over HTTPS to `api.anthropic.com`, the only extra host the network
+  allowlist permits for it. Nothing else is sent. The key is stored encrypted with an
+  AES-256-GCM key held in the Android Keystore and is only ever sent to that host. Remove key
+  or *Erase everything* deletes it. Anthropic's API terms cover what they do with requests.
 - **App updates.** The app reads this repo's latest release from `api.github.com` and
   downloads the APK from GitHub's hosts (HTTPS, no token, nothing about you sent). Before
   installing it checks the published SHA-256, that the package name matches, that the build

@@ -26,6 +26,7 @@ import com.listingprep.data.Store
 import com.listingprep.data.TokenVault
 import com.listingprep.media.MediaInfo
 import com.listingprep.ml.Analyzed
+import com.listingprep.ml.Claude
 import com.listingprep.ml.Describer
 import com.listingprep.ml.Embedder
 import com.listingprep.ml.Grouper
@@ -60,6 +61,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -90,10 +92,13 @@ data class UiState(
     val justUpdated: UpdateUi? = null,
     /** Report from a crash last time the app ran, offered for copying once. */
     val crashReport: String? = null,
+    /** An Anthropic API key is saved for cloud writing with Claude. */
+    val hasClaudeKey: Boolean = false,
 ) {
-    /** Descriptions can be written: the on-phone model is there, or Google writing is on with a key. */
-    val canWrite: Boolean get() = modelPath != null || nanoReady
+    /** Descriptions can be written: an on-phone model is there, or cloud writing is on with a key. */
+    val canWrite: Boolean get() = modelPath != null || nanoReady || cloudReady
     val nanoReady: Boolean get() = settings.useNano && nano == Nano.State.READY
+    val cloudReady: Boolean get() = settings.cloudWriting && hasClaudeKey
 }
 
 data class UpdateUi(
@@ -144,6 +149,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             items = store.loadItems(),
             settings = store.loadSettings(),
             modelPath = ModelFiles.find(app)?.absolutePath,
+            hasClaudeKey = store.claudeKey != null,
         )
     )
     val state = _state.asStateFlow()
@@ -483,6 +489,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.saveSettings(s)
     }
 
+    /** Saves (or, when blank, removes) the Anthropic API key for cloud writing. */
+    fun saveClaudeKey(key: String?) {
+        val k = key?.trim()?.takeIf { it.isNotEmpty() }
+        store.claudeKey = k
+        _state.update { it.copy(hasClaudeKey = k != null) }
+        if (k == null) updateSettings { it.copy(cloudWriting = false) }
+    }
+
     fun showError(message: String) = _state.update { it.copy(error = message) }
     fun clearError() = _state.update { it.copy(error = null) }
 
@@ -617,6 +631,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return Describer.parse(text).takeUnless { Describer.looksBroken(it) }
     }
 
+    /**
+     * One listing from Claude in the cloud, or null if cloud writing is off or gave a bad answer.
+     * If Claude can't be reached, the phone's AI writes it instead (with a note saying why).
+     */
+    private suspend fun cloudListing(prompt: String, photos: List<ByteArray>): Describer.Companion.Listing? {
+        if (!_state.value.cloudReady) return null
+        val key = store.claudeKey ?: return null
+        return try {
+            val text = runInterruptible(Dispatchers.IO) { Claude.write(key, photos, prompt) }
+            Describer.parse(text).takeUnless { Describer.looksBroken(it) }
+        } catch (e: Claude.Failed) {
+            if (_state.value.modelPath == null && !_state.value.nanoReady) throw IllegalStateException(e.message)
+            showError("${e.message} This one was written on the phone instead.")
+            null
+        }
+    }
+
     // ---- running the model (stoppable) --------------------------------------
 
     private val describeLock = Mutex()
@@ -655,7 +686,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (item.description.isBlank()) return@work
             val prompt = Describer.rewritePrompt(item.title, stripDefaults(item.description, _state.value.settings), tone)
             _state.update { it.copy(generatingId = id) }
-            val fromNano = nanoListing(prompt, null, 0.5f)
+            val fromNano = cloudListing(prompt, emptyList()) ?: nanoListing(prompt, null, 0.5f)
             val path = _state.value.modelPath
             if (fromNano == null && path == null) throw IllegalStateException("No AI model yet. Download it in Settings.")
             val listing = fromNano ?: withContext(Background) {
@@ -723,7 +754,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
 
     /** What the photos say, worked out before the model runs (text, codes, the cover for the AI). */
-    private class Analysis(val ocr: String, val codes: List<String>, val cover: Bitmap?)
+    private class Analysis(val ocr: String, val codes: List<String>, val cover: Bitmap?, val uploads: List<ByteArray> = emptyList())
 
     /**
      * Each photo is decoded once and read for text and codes, three at a time. Runs on the CPU,
@@ -731,6 +762,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     private suspend fun analyze(item: Item): Analysis = withContext(Background) {
         val cr = ctx.contentResolver
+        val cloud = _state.value.cloudReady
         val ocr = Ocr.client()
         val scanner = Codes.scanner()
         try {
@@ -741,25 +773,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         val bmp = runCatching { MediaInfo.decode(cr, Uri.parse(p.uri), 1600) }.getOrNull() ?: return@withPermit null
                         val codes = Codes.foundIn(scanner, bmp)
                         val text = if (i < 6) Ocr.linesIn(ocr, bmp) else emptyList()
+                        // Cloud writing: the first few photos, shrunk to JPEGs for upload.
+                        val upload = if (cloud && i < Claude.MAX_PHOTOS) runCatching { Claude.jpeg(bmp) }.getOrNull() else null
                         val cover = if (i == 0) {
                             val s = 768f / maxOf(bmp.width, bmp.height)
                             if (s < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt(), (bmp.height * s).toInt(), true) else bmp.copy(bmp.config ?: Bitmap.Config.ARGB_8888, false)
                         } else null
                         bmp.recycle()
-                        Triple(text, codes, cover)
+                        Parts(text, codes, cover, upload)
                     }
                 }
             }.awaitAll()
             Analysis(
-                ocr = Ocr.clean(parts.flatMap { it?.first.orEmpty() }),
-                codes = parts.flatMap { it?.second.orEmpty() }.distinct().take(8),
-                cover = parts.firstOrNull()?.third,
+                ocr = Ocr.clean(parts.flatMap { it?.text.orEmpty() }),
+                codes = parts.flatMap { it?.codes.orEmpty() }.distinct().take(8),
+                cover = parts.firstOrNull()?.cover,
+                uploads = parts.mapNotNull { it?.upload },
             )
         } finally {
             ocr.close()
             scanner.close()
         }
     }
+
+    private class Parts(val text: List<String>, val codes: List<String>, val cover: Bitmap?, val upload: ByteArray?)
 
     /** Loads the model in the background (e.g. while you're still taking photos) so writing starts at once. */
     /**
@@ -779,7 +816,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun warmUp() {
         val path = _state.value.modelPath ?: return
         // Not needed when Gemini Nano writes; loading it then only costs memory.
-        if (_state.value.nanoReady) return
+        if (_state.value.nanoReady || _state.value.cloudReady) return
         if (describer.isLoaded(path)) return
         viewModelScope.launch(Background + safe) {
             runCatching { describeLock.withLock { describer.ensureLoaded(path) } }
@@ -790,7 +827,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val item = _state.value.items.find { it.id == id } ?: return
         val settings = _state.value.settings
         val path = _state.value.modelPath
-        if (path == null && !_state.value.nanoReady) {
+        if (path == null && !_state.value.nanoReady && !_state.value.cloudReady) {
             throw IllegalStateException("No AI model yet. Download it in Settings.")
         }
         _state.update { it.copy(generatingId = id) }
@@ -804,9 +841,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val place = Regions.describe(settings)
             var known = item.copy(codes = codes)
 
-            // One attempt: Gemini Nano if the phone has it, otherwise the downloaded model.
+            // One attempt: Claude if cloud writing is on, then Gemini Nano if the phone has it, then the downloaded model.
             suspend fun attempt(): Describer.Companion.Listing? {
                 val prompt = Describer.prompt(known, analysis.ocr, style, place, Regions.current(settings).currency)
+                if (_state.value.cloudReady) {
+                    progress("Writing with Claude…", _state.value.progress)
+                    // Claude follows the writing style itself, so no separate style pass is needed.
+                    cloudListing(prompt, analysis.uploads)?.let { return it }
+                    progress(label ?: "Writing description…", _state.value.progress)
+                }
                 // The phone's built-in Gemini Nano: fast, private, no big download.
                 nanoListing(prompt, analysis.cover, 0.2f)?.let { return it }
                 val p = path ?: return null
@@ -1035,6 +1078,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         store.hfToken = null
         store.clearOldGeminiKey()
+        store.claudeKey = null
+        _state.update { it.copy(hasClaudeKey = false) }
         TokenVault.deleteKey()
         setItems { emptyList() } // goes through the same save queue, so no stale write lands after
         store.saveSettings(Settings())

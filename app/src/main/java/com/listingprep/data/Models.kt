@@ -60,6 +60,8 @@ data class Settings(
     val autoWrite: Boolean = true,
     /** Use the phone's built-in Gemini Nano when the phone has it (before the 4.4 GB model). */
     val useNano: Boolean = true,
+    /** Write with Claude in the cloud (your own API key; photos are uploaded). Off by default. */
+    val cloudWriting: Boolean = false,
     /** Download new builds from GitHub and install them when you leave the app. */
     val autoUpdate: Boolean = true,
     /** Send anonymous crash reports to the public issue board automatically. */

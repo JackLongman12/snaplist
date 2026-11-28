@@ -10,6 +10,7 @@
 - **Or sorts existing photos.** *From gallery* lets you pick photos; on-device image matching groups them into items and picks the sharpest as the cover.
 - **Tracks what's sold.** Items move from *To post* to *Posted* to *Sold*. Delete a sold item and its photos go too: in-app shots, the copies made for Facebook and, if you choose, the gallery originals.
 - **Writes the listing.** Gemma 3n runs on the phone, reads brand names and labels from the photos, and writes a title and description. Nothing is uploaded.
+- **Better descriptions with Claude (optional).** Turn on Settings → *Better descriptions (cloud)* and add your own [Anthropic API key](https://console.anthropic.com): Claude looks at up to 4 photos of each item and writes much more accurate listings than the phone's AI, at about 5 cents per listing billed to your key. Off by default; when it's on, the item's photos (shrunk) and what was read from them go to api.anthropic.com. If Claude can't be reached, the phone writes it.
 - **Reads barcodes and QR codes** in your photos on the phone and gives them to the AI. If the AI still can't tell what the item is, the barcode number (only that) is looked up online at upcitemdb.com, Open Food Facts or Open Library. You can turn this off in Settings.
 - **Writes in the background.** After you shoot, descriptions get written while you do something else; a notification says when they're ready.
 - **Your writing style.** Settings → *AI writing style* sets how every description reads (presets or your own instructions).
@@ -33,7 +34,7 @@ Built and tested for the Galaxy S26 Ultra (Android 13+, 64-bit ARM, 8 GB+ RAM re
 
 ## Privacy
 
-Photos, items and AI processing stay on the phone. The app only connects to Hugging Face (model download), GitHub (updates) and, when you use them, the barcode and price lookups; all other connections are blocked. If the app crashes, an anonymous report (app build, Android version, phone model, the day and the code lines that failed; no messages or personal data) is posted to this repo's [issue board](https://github.com/JackLongman12/snaplist/issues?q=label%3Acrash); you can turn this off in Settings. Shared photos carry no location data. See [SECURITY.md](SECURITY.md) for details and how to report a problem.
+Photos, items and AI processing stay on the phone unless you turn on cloud writing with Claude. The app only connects to Hugging Face (model download), GitHub (updates) and, when you use them, the barcode lookup and Claude (api.anthropic.com); all other connections are blocked. If the app crashes, an anonymous report (app build, Android version, phone model, the day and the code lines that failed; no messages or personal data) is posted to this repo's [issue board](https://github.com/JackLongman12/snaplist/issues?q=label%3Acrash); you can turn this off in Settings. Shared photos carry no location data. See [SECURITY.md](SECURITY.md) for details and how to report a problem.
 
 ## Build from source
 
@@ -54,6 +55,8 @@ GitHub Actions builds and signs every push to `main` (see `.github/workflows/bui
 ## Credits
 
 State / province names come from the ISO 3166-2 data of Debian's [iso-codes](https://salsa.debian.org/iso-codes-team/iso-codes) project (LGPL-2.1), bundled as `app/src/main/assets/subdivisions.json`.
+
+Optional cloud writing uses [Claude](https://www.anthropic.com/claude) by Anthropic through the [Anthropic Java SDK](https://github.com/anthropics/anthropic-sdk-java) (MIT).
 
 AI models: [Gemma 3n](https://ai.google.dev/gemma) by Google, provided under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms) (downloaded on the phone, not bundled); Gemini Nano via Android AICore; MediaPipe models (image embedding, interactive segmentation) and ML Kit (text and barcode recognition) by Google.
 

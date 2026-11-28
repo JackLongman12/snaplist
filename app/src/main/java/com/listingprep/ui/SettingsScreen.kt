@@ -208,6 +208,9 @@ internal fun SettingsScreen(state: UiState, vm: AppViewModel, onBack: () -> Unit
             TextButton(onClick = { vm.refreshNano(download = state.settings.useNano) }) { Text("Check again") }
 
             HorizontalDivider()
+            CloudSection(state, vm)
+
+            HorizontalDivider()
             Text("Updates and crash reports", style = MaterialTheme.typography.titleMedium)
             SettingSwitch(
                 title = "Update automatically",
@@ -250,5 +253,74 @@ internal fun SettingsScreen(state: UiState, vm: AppViewModel, onBack: () -> Unit
                 }
             }
         }
+    }
+}
+
+/** Optional cloud writing with Claude: your own Anthropic API key, off by default. */
+@Composable
+private fun CloudSection(state: UiState, vm: AppViewModel) {
+    var editing by remember { mutableStateOf(false) }
+    Text("Better descriptions (cloud)", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Claude, a large AI from Anthropic, looks at up to ${com.listingprep.ml.Claude.MAX_PHOTOS} photos of each item and " +
+            "writes far more accurate listings than the phone's AI. It needs your own Anthropic API key " +
+            "(console.anthropic.com) and costs about 5 cents per listing, billed to that key.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    SettingSwitch(
+        title = "Write with Claude",
+        detail = if (state.hasClaudeKey) {
+            "When on, the item's photos (shrunk), what was read from them and your notes are sent over HTTPS to " +
+                "api.anthropic.com. Nothing else leaves the phone. If Claude can't be reached, the phone's AI writes it instead."
+        } else {
+            "Add an API key first."
+        },
+        checked = state.settings.cloudWriting && state.hasClaudeKey,
+        onChange = { on ->
+            if (on && !state.hasClaudeKey) editing = true
+            else vm.updateSettings { it.copy(cloudWriting = on) }
+        },
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { editing = true }) { Text(if (state.hasClaudeKey) "Change API key" else "Add API key") }
+        if (state.hasClaudeKey) TextButton(onClick = { vm.saveClaudeKey(null) }) { Text("Remove key") }
+    }
+    if (editing) {
+        var key by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Anthropic API key") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Create one at console.anthropic.com → API keys, then paste it here. It's stored encrypted " +
+                            "with a key locked in the phone's hardware, and only ever sent to api.anthropic.com. " +
+                            "Set a monthly spend limit in the Console if you like.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = key,
+                        onValueChange = { key = it.trim() },
+                        label = { Text("sk-ant-…") },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = key.startsWith("sk-ant-") && key.length > 20,
+                    onClick = {
+                        vm.saveClaudeKey(key)
+                        vm.updateSettings { it.copy(cloudWriting = true) }
+                        editing = false
+                    },
+                ) { Text("Save and turn on") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
+        )
     }
 }

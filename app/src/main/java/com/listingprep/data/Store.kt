@@ -33,6 +33,7 @@ class Store(context: Context) {
         autoUpdate = prefs.getBoolean("autoUpdate", true),
         crashReports = prefs.getBoolean("crashReports", true),
         useNano = prefs.getBoolean("useNano", true),
+        cloudWriting = prefs.getBoolean("cloudWriting2", false),
         region = prefs.getString("region", null) ?: "",
         city = prefs.getString("city", null) ?: "",
         area = prefs.getString("area", null) ?: "",
@@ -49,6 +50,7 @@ class Store(context: Context) {
             .putBoolean("autoUpdate", s.autoUpdate)
             .putBoolean("crashReports", s.crashReports)
             .putBoolean("useNano", s.useNano)
+            .putBoolean("cloudWriting2", s.cloudWriting)
             .putString("region", s.region)
             .putString("city", s.city)
             .putString("area", s.area)
@@ -62,6 +64,15 @@ class Store(context: Context) {
         set(v) {
             prefs.edit().apply {
                 if (v.isNullOrBlank()) remove("hfTokenEnc") else putString("hfTokenEnc", TokenVault.encrypt(v))
+            }.apply()
+        }
+
+    /** Anthropic API key for cloud writing with Claude, encrypted with a Keystore key (see [TokenVault]). */
+    var claudeKey: String?
+        get() = prefs.getString("claudeKeyEnc", null)?.let(TokenVault::decrypt)
+        set(v) {
+            prefs.edit().apply {
+                if (v.isNullOrBlank()) remove("claudeKeyEnc") else putString("claudeKeyEnc", TokenVault.encrypt(v.trim()))
             }.apply()
         }
 
